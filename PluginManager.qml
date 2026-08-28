@@ -20,7 +20,6 @@ Item {
   property var plugins: []
   property string statusText: ""
   property bool busy: false
-  property string selectedId: ""
 
   readonly property string sourceDir: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir) : ""
@@ -78,8 +77,6 @@ Item {
     if (!kinds || !kinds.length) return ""
     return kinds.join(", ")
   }
-
-  function isSelected(id) { return id === root.selectedId }
 
   Process {
     id: listProcess
@@ -168,19 +165,11 @@ Item {
           delegate: Rectangle {
             id: row
             width: listView.width
-            height: root.isSelected(modelData.id) ? 120 : 56
+            height: 96
             radius: Style.cornerRadius
-            color: root.isSelected(modelData.id)
-              ? Color.pick("panel.item.selected", Color.pick("panel.item", "transparent"))
-              : Color.pick("panel.item", "transparent")
-            Behavior on height { NumberAnimation { duration: 120 } }
+            color: Color.pick("panel.item", "transparent")
 
-            MouseArea {
-              anchors.fill: parent
-              onClicked: root.selectedId = (root.isSelected(modelData.id) ? "" : modelData.id)
-            }
-
-            // Name + id (top)
+            // Name + id (top-left)
             Column {
               anchors.left: parent.left
               anchors.right: removeButton.left
@@ -231,41 +220,43 @@ Item {
               onClicked: root.removePlugin(modelData.id)
             }
 
-            // Expanded details (description, author, version, source link)
-            Column {
-              visible: root.isSelected(modelData.id)
+            // Description (always visible)
+            Text {
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.top: parent.top
               anchors.leftMargin: 12
               anchors.rightMargin: 12
               anchors.topMargin: 44
-              spacing: 4
+              text: modelData.description || "No description."
+              font.pixelSize: Style.font.bodySmall
+              color: Color.foreground
+              wrapMode: Text.WordWrap
+              maximumLineCount: 2
+              elide: Text.ElideRight
+            }
+
+            // Author + version + source link (bottom)
+            Row {
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.bottom: parent.bottom
+              anchors.leftMargin: 12
+              anchors.rightMargin: 12
+              anchors.bottomMargin: 6
+              spacing: 12
 
               Text {
-                width: parent.width
-                text: modelData.description || "No description."
-                font.pixelSize: Style.font.bodySmall
-                color: Color.foreground
-                wrapMode: Text.WordWrap
-                maximumLineCount: 3
-                elide: Text.ElideRight
+                text: modelData.author ? "by " + modelData.author : ""
+                font.pixelSize: Style.font.caption
+                color: Color.muted
               }
-
-              Row {
-                spacing: 12
-                Text {
-                  text: modelData.author ? "by " + modelData.author : ""
-                  font.pixelSize: Style.font.caption
-                  color: Color.muted
-                }
-                Text {
-                  text: modelData.version ? "v" + modelData.version : ""
-                  font.pixelSize: Style.font.caption
-                  color: Color.muted
-                }
+              Text {
+                text: modelData.version ? "v" + modelData.version : ""
+                font.pixelSize: Style.font.caption
+                color: Color.muted
               }
-
+              Item { width: 1; height: 1 }
               Text {
                 visible: !!modelData.sourceUrl
                 text: "Open source ↗"
