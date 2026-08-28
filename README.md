@@ -10,6 +10,10 @@ omarchy plugin add https://github.com/gamisn/omarchy-plugin-manager.git --enable
 
 ## Summon
 
+The plugin adds a **gear icon (⚙) to the bar** — click it to open the manager panel.
+
+You can also summon it from the terminal:
+
 ```bash
 omarchy-shell shell toggle gamisn.plugin-manager
 ```
@@ -22,6 +26,7 @@ o.bind("SUPER + P", "Plugin Manager", "omarchy-shell shell toggle gamisn.plugin-
 
 ## What it does
 
+- Adds a gear icon to the bar that opens the manager panel
 - Lists every installed plugin (id, name, kinds, enabled state)
 - Removes a plugin with one click (`omarchy plugin remove <id> --yes`)
 
