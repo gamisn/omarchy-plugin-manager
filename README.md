@@ -30,6 +30,7 @@ o.bind("SUPER + P", "Plugin Manager", "omarchy-shell shell toggle gamisn.plugin-
 - Lists every installed plugin with its **description, author, version, and source link**
 - Third-party plugins show a clickable **"Open source ↗"** link to their GitHub repo
 - Removes a plugin with one click (`omarchy plugin remove <id> --yes`)
+- Shows the **remove command output** in a log area at the bottom (e.g. "Removed X.", "Restored Y.")
 
 ## Notes
 
