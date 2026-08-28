@@ -161,12 +161,14 @@ Item {
                 Layout.fillWidth: true
                 spacing: 2
                 Text {
+                  Layout.fillWidth: true
                   text: modelData.name
                   font.pixelSize: Style.font.body
                   color: Color.foreground
                   elide: Text.ElideRight
                 }
                 Text {
+                  Layout.fillWidth: true
                   text: modelData.id + "  ·  " + root.kindLabel(modelData.kinds)
                   font.pixelSize: Style.font.caption
                   color: Color.muted
