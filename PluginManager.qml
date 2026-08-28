@@ -6,8 +6,9 @@ import Quickshell.Io
 import qs.Ui
 import qs.Commons
 
-// Plugin Manager — a simple panel that lists installed Omarchy plugins and
-// lets you remove them. Summon with:
+// Plugin Manager — a panel that lists installed Omarchy plugins with their
+// description, author, version, and source link, and lets you remove them.
+// Summon with:
 //   omarchy-shell shell toggle gamisn.plugin-manager
 Item {
   id: root
@@ -19,6 +20,11 @@ Item {
   property var plugins: []
   property string statusText: ""
   property bool busy: false
+  property string selectedId: ""
+
+  readonly property string sourceDir: manifest && manifest.__sourceDir
+    ? String(manifest.__sourceDir) : ""
+  readonly property string helperPath: sourceDir ? sourceDir + "/bin/plugin-manager" : ""
 
   // ---- lifecycle (panel contract) ----------------------------------------
   function open(payloadJson) {
@@ -44,7 +50,11 @@ Item {
   function refresh() {
     if (listProcess.running) return
     statusText = "Loading…"
-    listProcess.command = ["omarchy", "plugin", "list", "--json"]
+    if (helperPath) {
+      listProcess.command = [helperPath]
+    } else {
+      listProcess.command = ["omarchy", "plugin", "list", "--json"]
+    }
     listProcess.running = true
   }
 
@@ -56,10 +66,20 @@ Item {
     removeProcess.running = true
   }
 
+  function openSource(url) {
+    if (!url) return
+    if (root.shell && typeof root.shell.run === "function")
+      root.shell.run("xdg-open " + url)
+    else
+      Quickshell.execDetached(["xdg-open", url])
+  }
+
   function kindLabel(kinds) {
     if (!kinds || !kinds.length) return ""
     return kinds.join(", ")
   }
+
+  function isSelected(id) { return id === root.selectedId }
 
   Process {
     id: listProcess
@@ -96,9 +116,9 @@ Item {
     id: window
     title: "Plugin Manager"
     color: Color.background
-    implicitWidth: 560
-    implicitHeight: 640
-    minimumSize: Qt.size(420, 400)
+    implicitWidth: 640
+    implicitHeight: 720
+    minimumSize: Qt.size(480, 440)
 
     onVisibleChanged: {
       if (!visible && !root.closingFromHost && root.shell && typeof root.shell.hide === "function")
@@ -146,25 +166,35 @@ Item {
           spacing: 4
 
           delegate: Rectangle {
+            id: row
             width: listView.width
-            height: 52
+            height: root.isSelected(modelData.id) ? 120 : 56
             radius: Style.cornerRadius
-            color: Color.pick("panel.item", "transparent")
+            color: root.isSelected(modelData.id)
+              ? Color.pick("panel.item.selected", Color.pick("panel.item", "transparent"))
+              : Color.pick("panel.item", "transparent")
+            Behavior on height { NumberAnimation { duration: 120 } }
 
-            // Name column fills the row width via anchors; trailing controls
-            // sit at a fixed right edge so status/Remove form stable columns.
+            MouseArea {
+              anchors.fill: parent
+              onClicked: root.selectedId = (root.isSelected(modelData.id) ? "" : modelData.id)
+            }
+
+            // Name + id (top)
             Column {
               anchors.left: parent.left
               anchors.right: removeButton.left
-              anchors.verticalCenter: parent.verticalCenter
+              anchors.top: parent.top
               anchors.leftMargin: 12
               anchors.rightMargin: 8
+              anchors.topMargin: 8
               spacing: 2
 
               Text {
                 width: parent.width
                 text: modelData.name
                 font.pixelSize: Style.font.body
+                font.bold: true
                 color: Color.foreground
                 elide: Text.ElideRight
               }
@@ -177,6 +207,7 @@ Item {
               }
             }
 
+            // Status + Remove (right)
             Text {
               id: statusText
               anchors.right: removeButton.left
@@ -198,6 +229,54 @@ Item {
               text: "Remove"
               enabled: !root.busy
               onClicked: root.removePlugin(modelData.id)
+            }
+
+            // Expanded details (description, author, version, source link)
+            Column {
+              visible: root.isSelected(modelData.id)
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: parent.top
+              anchors.leftMargin: 12
+              anchors.rightMargin: 12
+              anchors.topMargin: 44
+              spacing: 4
+
+              Text {
+                width: parent.width
+                text: modelData.description || "No description."
+                font.pixelSize: Style.font.bodySmall
+                color: Color.foreground
+                wrapMode: Text.WordWrap
+                maximumLineCount: 3
+                elide: Text.ElideRight
+              }
+
+              Row {
+                spacing: 12
+                Text {
+                  text: modelData.author ? "by " + modelData.author : ""
+                  font.pixelSize: Style.font.caption
+                  color: Color.muted
+                }
+                Text {
+                  text: modelData.version ? "v" + modelData.version : ""
+                  font.pixelSize: Style.font.caption
+                  color: Color.muted
+                }
+              }
+
+              Text {
+                visible: !!modelData.sourceUrl
+                text: "Open source ↗"
+                font.pixelSize: Style.font.caption
+                color: Color.accent
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.openSource(modelData.sourceUrl)
+                }
+              }
             }
           }
         }

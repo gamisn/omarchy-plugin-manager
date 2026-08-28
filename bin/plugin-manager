@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Plugin Manager helper — enriches `omarchy plugin list --json` with each
+# plugin's description, author, version, and source URL (from its manifest
+# and git remote). Writes one JSON array to stdout.
+set -uo pipefail
+
+HOME_DIR="${HOME:-}"
+FIRST_PARTY_DIR="/usr/share/omarchy/shell/plugins"
+THIRD_PARTY_DIR="$HOME_DIR/.config/omarchy/plugins"
+
+# Find a manifest for a plugin id. First-party manifests are nested under
+# FIRST_PARTY_DIR (including bar/widgets/*.manifest.json); third-party live
+# at THIRD_PARTY_DIR/<id>/manifest.json.
+find_manifest() {
+  local id="$1"
+  local f
+  # third-party first (user-owned)
+  f="$THIRD_PARTY_DIR/$id/manifest.json"
+  [[ -f "$f" ]] && { echo "$f"; return 0; }
+  # first-party: search recursively
+  f=$(find "$FIRST_PARTY_DIR" -name '*.manifest.json' -o -name 'manifest.json' 2>/dev/null \
+      | xargs grep -l "\"id\": \"$id\"" 2>/dev/null | head -1)
+  [[ -n "$f" ]] && { echo "$f"; return 0; }
+  return 1
+}
+
+# Get the git source URL for a plugin (third-party only).
+source_url() {
+  local id="$1"
+  local dir="$THIRD_PARTY_DIR/$id"
+  [[ -d "$dir/.git" ]] || return 0
+  git -C "$dir" remote get-url origin 2>/dev/null || true
+}
+
+# Read the raw plugin list.
+raw=$(omarchy plugin list --json 2>/dev/null) || { echo "[]"; exit 1; }
+
+# Enrich each entry.
+echo "$raw" | jq -c '.[]' | while IFS= read -r line; do
+  id=$(echo "$line" | jq -r '.id')
+  manifest="$(find_manifest "$id")"
+  if [[ -n "$manifest" ]]; then
+    desc=$(jq -r '.description // ""' "$manifest" 2>/dev/null)
+    author=$(jq -r '.author // ""' "$manifest" 2>/dev/null)
+    version=$(jq -r '.version // ""' "$manifest" 2>/dev/null)
+  else
+    desc=""; author=""; version=""
+  fi
+  url="$(source_url "$id")"
+  echo "$line" | jq -c --arg desc "$desc" --arg author "$author" \
+    --arg version "$version" --arg url "$url" \
+    '. + {description: $desc, author: $author, version: $version, sourceUrl: $url}'
+done | jq -s '.'
