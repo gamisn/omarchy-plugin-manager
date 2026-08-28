@@ -208,6 +208,8 @@ Item {
           clip: true
           model: root.plugins
           spacing: 4
+          reuseItems: true
+          cacheBuffer: 200
 
           delegate: Rectangle {
             id: row
