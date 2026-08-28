@@ -20,7 +20,14 @@ Item {
   property var plugins: []
   property string statusText: ""
   property bool busy: false
-  property string removeLog: ""
+
+  // Remove-dialog state
+  property var removeTarget: null
+  property string removeCommand: ""
+  property string removeOutput: ""
+  property bool removeRunning: false
+  property bool removeDone: false
+  property bool removeSuccess: false
 
   readonly property string sourceDir: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir) : ""
@@ -58,14 +65,6 @@ Item {
     listProcess.running = true
   }
 
-  function removePlugin(id) {
-    if (busy || !id) return
-    busy = true
-    statusText = "Removing " + id + "…"
-    removeProcess.command = ["omarchy", "plugin", "remove", id, "--yes"]
-    removeProcess.running = true
-  }
-
   function openSource(url) {
     if (!url) return
     if (root.shell && typeof root.shell.run === "function")
@@ -77,6 +76,33 @@ Item {
   function kindLabel(kinds) {
     if (!kinds || !kinds.length) return ""
     return kinds.join(", ")
+  }
+
+  // ---- remove dialog -----------------------------------------------------
+  function confirmRemove(plugin) {
+    if (busy || !plugin) return
+    removeTarget = plugin
+    removeCommand = "omarchy plugin remove " + plugin.id + " --yes"
+    removeOutput = ""
+    removeRunning = false
+    removeDone = false
+    removeSuccess = false
+    removeDialog.opened = true
+  }
+
+  function cancelRemove() {
+    if (removeRunning) return
+    removeDialog.opened = false
+    removeTarget = null
+  }
+
+  function runRemove() {
+    if (removeRunning) return
+    removeRunning = true
+    removeDone = false
+    removeOutput = ""
+    removeProcess.command = ["omarchy", "plugin", "remove", removeTarget.id, "--yes"]
+    removeProcess.running = true
   }
 
   Process {
@@ -99,16 +125,18 @@ Item {
     id: removeProcess
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: root.removeLog = text
+      onStreamFinished: root.removeOutput = text
     }
     stderr: StdioCollector {
       waitForEnd: true
-      onStreamFinished: root.removeLog = (root.removeLog ? root.removeLog + "\n" : "") + text
+      onStreamFinished: root.removeOutput = (root.removeOutput ? root.removeOutput + "\n" : "") + text
     }
     onExited: function(exitCode) {
-      root.busy = false
+      root.removeRunning = false
+      root.removeDone = true
+      root.removeSuccess = (exitCode === 0)
       if (exitCode === 0) {
-        root.statusText = "Removed"
+        root.statusText = "Removed " + root.removeTarget.id
         root.refresh()
       } else {
         root.statusText = "Remove failed"
@@ -136,7 +164,11 @@ Item {
       focus: true
 
       Keys.onPressed: function(event) {
-        if (event.key === Qt.Key_Escape) { root.requestClose(); event.accepted = true }
+        if (event.key === Qt.Key_Escape) {
+          if (removeDialog.opened) root.cancelRemove()
+          else root.requestClose()
+          event.accepted = true
+        }
       }
 
       ColumnLayout {
@@ -225,7 +257,7 @@ Item {
               width: 76
               text: "Remove"
               enabled: !root.busy
-              onClicked: root.removePlugin(modelData.id)
+              onClicked: root.confirmRemove(modelData)
             }
 
             // Description (always visible)
@@ -279,40 +311,143 @@ Item {
             }
           }
         }
+      }
 
-        // Operation log (shown after a remove)
+      // ---- Remove confirmation / result dialog ---------------------------
+      Rectangle {
+        id: removeDialog
+        property bool opened: false
+        visible: opened
+        anchors.fill: parent
+        color: Util.alpha(Color.background, 0.85)
+        z: 100
+
+        MouseArea {
+          anchors.fill: parent
+          enabled: !root.removeRunning
+          onClicked: root.cancelRemove()
+        }
+
         Rectangle {
-          visible: root.removeLog !== ""
-          Layout.fillWidth: true
-          Layout.preferredHeight: 64
+          id: dialogCard
+          width: Math.min(parent.width - 40, 480)
+          height: 300
+          anchors.centerIn: parent
           radius: Style.cornerRadius
-          color: Color.pick("panel.item", "transparent")
-          border.color: Color.muted
+          color: Color.background
+          border.color: root.removeDone
+            ? (root.removeSuccess ? Color.accent : Color.urgent)
+            : Color.muted
           border.width: 1
 
-          RowLayout {
-            anchors.fill: parent
-            anchors.margins: 8
-            spacing: 8
+          MouseArea { anchors.fill: parent; onClicked: {} }
 
+          ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 16
+            spacing: 10
+
+            // Title
             Text {
-              text: "Log"
+              Layout.fillWidth: true
+              text: root.removeDone
+                ? (root.removeSuccess ? "Removed" : "Remove failed")
+                : "Remove plugin?"
+              font.pixelSize: Style.font.title
+              font.bold: true
+              color: root.removeDone
+                ? (root.removeSuccess ? Color.accent : Color.urgent)
+                : Color.foreground
+            }
+
+            // Plugin name
+            Text {
+              Layout.fillWidth: true
+              text: root.removeTarget ? root.removeTarget.name + " (" + root.removeTarget.id + ")" : ""
+              font.pixelSize: Style.font.body
+              color: Color.foreground
+              elide: Text.ElideRight
+            }
+
+            // Command (always visible)
+            Text {
+              Layout.fillWidth: true
+              text: "Command:"
               font.pixelSize: Style.font.caption
               font.bold: true
               color: Color.muted
             }
-            Text {
+            Rectangle {
               Layout.fillWidth: true
-              text: root.removeLog
-              font.pixelSize: Style.font.caption
-              color: Color.foreground
-              wrapMode: Text.WordWrap
-              elide: Text.ElideRight
-              maximumLineCount: 3
+              Layout.preferredHeight: 30
+              radius: 4
+              color: Color.pick("panel.item", "transparent")
+              border.color: Color.muted
+              border.width: 1
+              Text {
+                anchors.fill: parent
+                anchors.margins: 6
+                text: root.removeCommand
+                font.family: "monospace"
+                font.pixelSize: Style.font.bodySmall
+                color: Color.foreground
+                elide: Text.ElideRight
+                verticalAlignment: Text.AlignVCenter
+              }
             }
-            Button {
-              text: "Clear"
-              onClicked: root.removeLog = ""
+
+            // Output (after running)
+            Rectangle {
+              visible: root.removeDone
+              Layout.fillWidth: true
+              Layout.fillHeight: true
+              radius: 4
+              color: Color.pick("panel.item", "transparent")
+              border.color: root.removeSuccess ? Color.accent : Color.urgent
+              border.width: 1
+              clip: true
+              Flickable {
+                anchors.fill: parent
+                anchors.margins: 6
+                contentWidth: width
+                contentHeight: outputText.height
+                Text {
+                  id: outputText
+                  width: parent.width
+                  text: root.removeOutput || "(no output)"
+                  font.family: "monospace"
+                  font.pixelSize: Style.font.bodySmall
+                  color: root.removeSuccess ? Color.foreground : Color.urgent
+                  wrapMode: Text.Wrap
+                }
+              }
+            }
+
+            // Buttons
+            RowLayout {
+              Layout.fillWidth: true
+              Layout.alignment: Qt.AlignBottom
+              spacing: 8
+
+              Item { Layout.fillWidth: true }
+
+              Button {
+                visible: !root.removeDone
+                text: "Cancel"
+                enabled: !root.removeRunning
+                onClicked: root.cancelRemove()
+              }
+              Button {
+                visible: !root.removeDone
+                text: root.removeRunning ? "Removing…" : "Remove"
+                enabled: !root.removeRunning
+                onClicked: root.runRemove()
+              }
+              Button {
+                visible: root.removeDone
+                text: "Close"
+                onClicked: root.cancelRemove()
+              }
             }
           }
         }
