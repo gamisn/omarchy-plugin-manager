@@ -151,46 +151,53 @@ Item {
             radius: Style.cornerRadius
             color: Color.pick("panel.item", "transparent")
 
-            RowLayout {
-              anchors.fill: parent
+            // Name column fills the row width via anchors; trailing controls
+            // sit at a fixed right edge so status/Remove form stable columns.
+            Column {
+              anchors.left: parent.left
+              anchors.right: removeButton.left
+              anchors.verticalCenter: parent.verticalCenter
               anchors.leftMargin: 12
               anchors.rightMargin: 8
-              spacing: 8
-
-              ColumnLayout {
-                Layout.fillWidth: true
-                Layout.minimumWidth: 0
-                spacing: 2
-                Text {
-                  Layout.fillWidth: true
-                  text: modelData.name
-                  font.pixelSize: Style.font.body
-                  color: Color.foreground
-                  elide: Text.ElideRight
-                }
-                Text {
-                  Layout.fillWidth: true
-                  text: modelData.id + "  ·  " + root.kindLabel(modelData.kinds)
-                  font.pixelSize: Style.font.caption
-                  color: Color.muted
-                  elide: Text.ElideRight
-                }
-              }
+              spacing: 2
 
               Text {
-                Layout.preferredWidth: 28
-                horizontalAlignment: Text.AlignHCenter
-                text: modelData.enabled ? "on" : "off"
+                width: parent.width
+                text: modelData.name
+                font.pixelSize: Style.font.body
+                color: Color.foreground
+                elide: Text.ElideRight
+              }
+              Text {
+                width: parent.width
+                text: modelData.id + "  ·  " + root.kindLabel(modelData.kinds)
                 font.pixelSize: Style.font.caption
-                color: modelData.enabled ? Color.accent : Color.muted
+                color: Color.muted
+                elide: Text.ElideRight
               }
+            }
 
-              Button {
-                Layout.preferredWidth: 76
-                text: "Remove"
-                enabled: !root.busy
-                onClicked: root.removePlugin(modelData.id)
-              }
+            Text {
+              id: statusText
+              anchors.right: removeButton.left
+              anchors.rightMargin: 10
+              anchors.verticalCenter: parent.verticalCenter
+              width: 28
+              horizontalAlignment: Text.AlignHCenter
+              text: modelData.enabled ? "on" : "off"
+              font.pixelSize: Style.font.caption
+              color: modelData.enabled ? Color.accent : Color.muted
+            }
+
+            Button {
+              id: removeButton
+              anchors.right: parent.right
+              anchors.rightMargin: 8
+              anchors.verticalCenter: parent.verticalCenter
+              width: 76
+              text: "Remove"
+              enabled: !root.busy
+              onClicked: root.removePlugin(modelData.id)
             }
           }
         }
