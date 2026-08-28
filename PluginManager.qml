@@ -159,6 +159,7 @@ Item {
 
               ColumnLayout {
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 spacing: 2
                 Text {
                   Layout.fillWidth: true
@@ -177,12 +178,15 @@ Item {
               }
 
               Text {
+                Layout.preferredWidth: 28
+                horizontalAlignment: Text.AlignHCenter
                 text: modelData.enabled ? "on" : "off"
                 font.pixelSize: Style.font.caption
                 color: modelData.enabled ? Color.accent : Color.muted
               }
 
               Button {
+                Layout.preferredWidth: 76
                 text: "Remove"
                 enabled: !root.busy
                 onClicked: root.removePlugin(modelData.id)
