@@ -20,6 +20,7 @@ Item {
   property var plugins: []
   property string statusText: ""
   property bool busy: false
+  property string removeLog: ""
 
   readonly property string sourceDir: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir) : ""
@@ -96,7 +97,14 @@ Item {
 
   Process {
     id: removeProcess
-    stdout: StdioCollector { waitForEnd: true }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.removeLog = text
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.removeLog = (root.removeLog ? root.removeLog + "\n" : "") + text
+    }
     onExited: function(exitCode) {
       root.busy = false
       if (exitCode === 0) {
@@ -268,6 +276,43 @@ Item {
                   onClicked: root.openSource(modelData.sourceUrl)
                 }
               }
+            }
+          }
+        }
+
+        // Operation log (shown after a remove)
+        Rectangle {
+          visible: root.removeLog !== ""
+          Layout.fillWidth: true
+          Layout.preferredHeight: 64
+          radius: Style.cornerRadius
+          color: Color.pick("panel.item", "transparent")
+          border.color: Color.muted
+          border.width: 1
+
+          RowLayout {
+            anchors.fill: parent
+            anchors.margins: 8
+            spacing: 8
+
+            Text {
+              text: "Log"
+              font.pixelSize: Style.font.caption
+              font.bold: true
+              color: Color.muted
+            }
+            Text {
+              Layout.fillWidth: true
+              text: root.removeLog
+              font.pixelSize: Style.font.caption
+              color: Color.foreground
+              wrapMode: Text.WordWrap
+              elide: Text.ElideRight
+              maximumLineCount: 3
+            }
+            Button {
+              text: "Clear"
+              onClicked: root.removeLog = ""
             }
           }
         }
