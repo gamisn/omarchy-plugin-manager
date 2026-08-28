@@ -5,7 +5,7 @@ A simple Omarchy panel that lists your installed plugins and lets you remove the
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/omarchy-gamisn/plugin-manager.git --enable --yes
+omarchy plugin add https://github.com/gamisn/omarchy-plugin-manager.git --enable --yes
 ```
 
 ## Summon
