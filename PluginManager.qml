@@ -28,7 +28,6 @@ Item {
   property bool removeRunning: false
   property bool removeDone: false
   property bool removeSuccess: false
-  property int pollAttempts: 0
 
   readonly property string sourceDir: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir) : ""
@@ -97,23 +96,17 @@ Item {
     removeTarget = null
   }
 
-  // Launch a real terminal (foot) running the remove command so the user can
-  // watch the live process. The panel stays open. The terminal keeps the
-  // window open after the command finishes so the output is readable.
+  // Run the remove command directly via Process, streaming its output live
+  // into the dialog. No external terminal needed; the panel stays open and
+  // shows the process output as it happens.
   function runRemove() {
     if (removeRunning) return
     removeRunning = true
     removeDone = false
     removeSuccess = false
     removeOutput = ""
-    var cmd = "omarchy plugin remove " + removeTarget.id + " --yes"
-    var keepOpen = "echo; echo '--- done (exit ' $? ') ---'; echo 'Press Enter to close'; read"
-    var shellCmd = "bash -c " + JSON.stringify(cmd + "; " + keepOpen)
-    Quickshell.execDetached(["foot", "-T", "Plugin Manager - Remove", shellCmd])
-    // Poll the plugin list until the target disappears (or a timeout) so the
-    // dialog can report the result once the terminal command has finished.
-    pollAttempts = 0
-    pollTimer.start()
+    removeProcess.command = ["omarchy", "plugin", "remove", removeTarget.id, "--yes"]
+    removeProcess.running = true
   }
 
   Process {
@@ -132,48 +125,28 @@ Item {
     }
   }
 
-  // Polls the plugin list while the terminal remove command runs. When the
-  // target plugin disappears from the list, the removal succeeded.
-  Timer {
-    id: pollTimer
-    interval: 1000
-    repeat: true
-    onTriggered: {
-      root.pollAttempts++
-      if (root.pollAttempts > 30) { // 30s timeout
-        root.removeRunning = false
-        root.removeDone = true
-        root.removeSuccess = false
-        root.removeOutput = "Timed out waiting for removal to finish."
-        stop()
-        return
-      }
-      pollProcess.command = ["omarchy", "plugin", "list", "--json"]
-      pollProcess.running = true
-    }
-  }
-
+  // Runs the remove command and streams its output live into the dialog.
   Process {
-    id: pollProcess
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var parsed = []
-        try { parsed = JSON.parse(text) } catch (e) { /* ignore */ }
-        var stillThere = false
-        for (var i = 0; i < parsed.length; i++) {
-          if (parsed[i] && parsed[i].id === root.removeTarget.id) { stillThere = true; break }
-        }
-        if (!stillThere) {
-          // Removal finished (plugin gone from list).
-          root.removeRunning = false
-          root.removeDone = true
-          root.removeSuccess = true
-          root.removeOutput = "Removed " + root.removeTarget.id + "."
-          root.statusText = "Removed " + root.removeTarget.id
-          root.refresh()
-          pollTimer.stop()
-        }
+    id: removeProcess
+    stdout: SplitParser {
+      onRead: function(data) {
+        root.removeOutput = (root.removeOutput ? root.removeOutput + "\n" : "") + data
+      }
+    }
+    stderr: SplitParser {
+      onRead: function(data) {
+        root.removeOutput = (root.removeOutput ? root.removeOutput + "\n" : "") + data
+      }
+    }
+    onExited: function(exitCode) {
+      root.removeRunning = false
+      root.removeDone = true
+      root.removeSuccess = (exitCode === 0)
+      if (exitCode === 0) {
+        root.statusText = "Removed " + root.removeTarget.id
+        root.refresh()
+      } else {
+        root.statusText = "Remove failed"
       }
     }
   }
@@ -430,14 +403,16 @@ Item {
               }
             }
 
-            // Output (after running)
+            // Output (live while running, final after done)
             Rectangle {
-              visible: root.removeDone
+              visible: root.removeRunning || root.removeDone
               Layout.fillWidth: true
               Layout.fillHeight: true
               radius: 4
               color: Color.pick("panel.item", "transparent")
-              border.color: root.removeSuccess ? Color.accent : Color.urgent
+              border.color: root.removeDone
+                ? (root.removeSuccess ? Color.accent : Color.urgent)
+                : Color.muted
               border.width: 1
               clip: true
               Flickable {
@@ -448,10 +423,10 @@ Item {
                 Text {
                   id: outputText
                   width: parent.width
-                  text: root.removeOutput || "(no output)"
+                  text: root.removeOutput || (root.removeRunning ? "Running…" : "(no output)")
                   font.family: "monospace"
                   font.pixelSize: Style.font.bodySmall
-                  color: root.removeSuccess ? Color.foreground : Color.urgent
+                  color: root.removeDone && !root.removeSuccess ? Color.urgent : Color.foreground
                   wrapMode: Text.Wrap
                 }
               }
@@ -461,7 +436,7 @@ Item {
             Text {
               visible: root.removeRunning
               Layout.fillWidth: true
-              text: "A terminal has opened — watch the process there. The panel stays open."
+              text: "Removing… watch the output below. The panel stays open."
               font.pixelSize: Style.font.caption
               color: Color.muted
               wrapMode: Text.WordWrap
