@@ -24,6 +24,8 @@ Or bind a key in `~/.config/hypr/bindings.lua`:
 o.bind("SUPER + P", "Plugin Manager", "omarchy-shell shell toggle gamisn.plugin-manager")
 ```
 
+In the panel: `↑`/`↓` move row by row, `Page Up`/`Page Down` and `Home`/`End` jump, the mouse wheel pages (one notch ≈ 70% of the view), and the scrollbar on the right is draggable.
+
 ## What it does
 
 - Adds a gear icon to the bar that opens the manager panel

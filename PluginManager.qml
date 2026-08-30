@@ -263,130 +263,274 @@ Item {
           }
         }
 
-        // List
-        ListView {
-          id: listView
+        // List — page-notched wheel scrolling, no rubber-band overshoot,
+        // keyboard navigation (arrows/PageUp/PageDown/Home/End), hover
+        // highlight, and a real draggable scrollbar. Flickable keeps touchpad
+        // flicks but stops hard at both ends (no overshoot, no blank gaps).
+        Item {
+          id: listContainer
           Layout.fillWidth: true
           Layout.fillHeight: true
           clip: true
-          model: root.plugins
-          spacing: 4
-          reuseItems: true
-          cacheBuffer: 200
 
-          delegate: Rectangle {
-            id: row
-            width: listView.width
-            height: 96
-            radius: Style.cornerRadius
-            color: Color.pick("panel.item", "transparent")
+          ListView {
+            id: listView
+            anchors.fill: parent
+            anchors.rightMargin: scrollBar.visible ? 10 : 0
+            model: root.plugins
+            spacing: 4
+            reuseItems: true
+            cacheBuffer: listView.height > 0 ? listView.height * 3 : 1200
+            boundsBehavior: Flickable.StopAtBounds
+            flickDeceleration: 6000
+            maximumFlickVelocity: 3000
+            highlightMoveDuration: 120
+            keyNavigationWraps: false
+            focus: true
 
-            // Name + id (top-left)
-            Column {
-              anchors.left: parent.left
-              anchors.right: removeButton.left
-              anchors.top: parent.top
-              anchors.leftMargin: 12
-              anchors.rightMargin: 8
-              anchors.topMargin: 8
-              spacing: 2
+            // Wheel scrolling: accumulates high-resolution deltas so slow
+            // spins are never swallowed, then animates a short glide.
+            property real wheelTarget: 0
 
+            function scrollBy(delta) {
+              if (!wheelAnim.running) wheelTarget = contentY
+              var maxScroll = Math.max(0, contentHeight - height)
+              wheelTarget = Math.max(0, Math.min(wheelTarget + delta, maxScroll))
+              wheelAnim.to = wheelTarget
+              wheelAnim.restart()
+            }
+
+            NumberAnimation {
+              id: wheelAnim
+              target: listView
+              property: "contentY"
+              duration: 160
+              easing.type: Easing.OutQuad
+            }
+
+            // One notch = ~70% of the visible height; pixelDelta (touchpads)
+            // moves proportionally. Always clamped — the list never overshoots.
+            WheelHandler {
+              acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+              onWheel: function(ev) {
+                if (ev.pixelDelta.y !== 0)
+                  listView.scrollBy(-ev.pixelDelta.y * 2)
+                else
+                  listView.scrollBy(-(ev.angleDelta.y / 120) * Math.max(120, listView.height * 0.7))
+                ev.accepted = true
+              }
+            }
+
+            Keys.onPressed: function(event) {
+              var rowStep = 100 // row height + spacing
+              var idx = listView.currentIndex
+              var last = listView.count - 1
+              var handled = true
+              if (event.key === Qt.Key_Down) {
+                listView.currentIndex = Math.min(last, Math.max(0, idx + 1))
+              } else if (event.key === Qt.Key_Up) {
+                listView.currentIndex = idx < 0 ? last : Math.max(0, idx - 1)
+              } else if (event.key === Qt.Key_PageDown) {
+                listView.currentIndex = Math.min(last, (idx < 0 ? 0 : idx) + Math.max(1, Math.floor(listView.height / rowStep) - 1))
+              } else if (event.key === Qt.Key_PageUp) {
+                listView.currentIndex = Math.max(0, (idx < 0 ? 0 : idx) - Math.max(1, Math.floor(listView.height / rowStep) - 1))
+              } else if (event.key === Qt.Key_Home) {
+                listView.currentIndex = 0
+              } else if (event.key === Qt.Key_End) {
+                listView.currentIndex = last
+              } else {
+                handled = false
+              }
+              if (handled && listView.count > 0) {
+                listView.positionViewAtIndex(listView.currentIndex, ListView.Contain)
+                event.accepted = true
+              }
+            }
+
+            delegate: Rectangle {
+              id: row
+              width: listView.width
+              height: 96
+              radius: Style.cornerRadius
+              color: ListView.isCurrentItem
+                ? Util.alpha(Color.accent, 0.14)
+                : (rowHover.containsMouse ? Util.alpha(Color.foreground, 0.05)
+                  : Color.pick("panel.item", "transparent"))
+
+              Behavior on color { ColorAnimation { duration: 80 } }
+
+              MouseArea {
+                id: rowHover
+                anchors.fill: parent
+                hoverEnabled: true
+                onClicked: listView.currentIndex = index
+              }
+
+              // Name + id (top-left)
+              Column {
+                anchors.left: parent.left
+                anchors.right: removeButton.left
+                anchors.top: parent.top
+                anchors.leftMargin: 12
+                anchors.rightMargin: 8
+                anchors.topMargin: 8
+                spacing: 2
+
+                Text {
+                  width: parent.width
+                  text: modelData.name
+                  textFormat: Text.PlainText
+                  font.pixelSize: Style.font.body
+                  font.bold: true
+                  color: Color.foreground
+                  elide: Text.ElideRight
+                }
+                Text {
+                  width: parent.width
+                  text: modelData.id + "  ·  " + root.kindLabel(modelData.kinds)
+                  textFormat: Text.PlainText
+                  font.pixelSize: Style.font.caption
+                  color: Color.muted
+                  elide: Text.ElideRight
+                }
+              }
+
+              // Status + Remove (right)
               Text {
-                width: parent.width
-                text: modelData.name
+                id: statusText
+                anchors.right: removeButton.left
+                anchors.rightMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                width: 28
+                horizontalAlignment: Text.AlignHCenter
+                text: modelData.enabled ? "on" : "off"
                 textFormat: Text.PlainText
-                font.pixelSize: Style.font.body
-                font.bold: true
+                font.pixelSize: Style.font.caption
+                color: modelData.enabled ? Color.accent : Color.muted
+              }
+
+              Button {
+                id: removeButton
+                anchors.right: parent.right
+                anchors.rightMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                width: 76
+                text: "Remove"
+                enabled: !root.busy
+                onClicked: root.confirmRemove(modelData)
+              }
+
+              // Description (always visible)
+              Text {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.leftMargin: 12
+                anchors.rightMargin: 12
+                anchors.topMargin: 44
+                text: modelData.description || "No description."
+                textFormat: Text.PlainText
+                font.pixelSize: Style.font.bodySmall
                 color: Color.foreground
+                wrapMode: Text.WordWrap
+                maximumLineCount: 2
                 elide: Text.ElideRight
               }
-              Text {
-                width: parent.width
-                text: modelData.id + "  ·  " + root.kindLabel(modelData.kinds)
-                textFormat: Text.PlainText
-                font.pixelSize: Style.font.caption
-                color: Color.muted
-                elide: Text.ElideRight
-              }
-            }
 
-            // Status + Remove (right)
-            Text {
-              id: statusText
-              anchors.right: removeButton.left
-              anchors.rightMargin: 10
-              anchors.verticalCenter: parent.verticalCenter
-              width: 28
-              horizontalAlignment: Text.AlignHCenter
-              text: modelData.enabled ? "on" : "off"
-              font.pixelSize: Style.font.caption
-              color: modelData.enabled ? Color.accent : Color.muted
-            }
+              // Author + version + source link (bottom)
+              Row {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.leftMargin: 12
+                anchors.rightMargin: 12
+                anchors.bottomMargin: 6
+                spacing: 12
 
-            Button {
-              id: removeButton
-              anchors.right: parent.right
-              anchors.rightMargin: 8
-              anchors.verticalCenter: parent.verticalCenter
-              width: 76
-              text: "Remove"
-              enabled: !root.busy
-              onClicked: root.confirmRemove(modelData)
-            }
-
-            // Description (always visible)
-            Text {
-              anchors.left: parent.left
-              anchors.right: parent.right
-              anchors.top: parent.top
-              anchors.leftMargin: 12
-              anchors.rightMargin: 12
-              anchors.topMargin: 44
-              text: modelData.description || "No description."
-              textFormat: Text.PlainText
-              font.pixelSize: Style.font.bodySmall
-              color: Color.foreground
-              wrapMode: Text.WordWrap
-              maximumLineCount: 2
-              elide: Text.ElideRight
-            }
-
-            // Author + version + source link (bottom)
-            Row {
-              anchors.left: parent.left
-              anchors.right: parent.right
-              anchors.bottom: parent.bottom
-              anchors.leftMargin: 12
-              anchors.rightMargin: 12
-              anchors.bottomMargin: 6
-              spacing: 12
-
-              Text {
-                text: modelData.author ? "by " + modelData.author : ""
-                textFormat: Text.PlainText
-                font.pixelSize: Style.font.caption
-                color: Color.muted
-              }
-              Text {
-                text: modelData.version ? "v" + modelData.version : ""
-                textFormat: Text.PlainText
-                font.pixelSize: Style.font.caption
-                color: Color.muted
-              }
-              Item { width: 1; height: 1 }
-              Text {
-                // Only render a clickable link when the URL passes validation.
-                visible: !!modelData.sourceUrl && Sec.isSafeSourceUrl(modelData.sourceUrl)
-                text: "Open source ↗"
-                font.pixelSize: Style.font.caption
-                color: Color.accent
-                MouseArea {
-                  anchors.fill: parent
-                  cursorShape: Qt.PointingHandCursor
-                  onClicked: root.openSource(modelData.sourceUrl)
+                Text {
+                  text: modelData.author ? "by " + modelData.author : ""
+                  textFormat: Text.PlainText
+                  font.pixelSize: Style.font.caption
+                  color: Color.muted
+                }
+                Text {
+                  text: modelData.version ? "v" + modelData.version : ""
+                  textFormat: Text.PlainText
+                  font.pixelSize: Style.font.caption
+                  color: Color.muted
+                }
+                Item { width: 1; height: 1 }
+                Text {
+                  // Only render a clickable link when the URL passes validation.
+                  visible: !!modelData.sourceUrl && Sec.isSafeSourceUrl(modelData.sourceUrl)
+                  text: "Open source ↗"
+                  font.pixelSize: Style.font.caption
+                  color: Color.accent
+                  MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.openSource(modelData.sourceUrl)
+                  }
                 }
               }
             }
+          }
+
+          // Scrollbar (draggable, brightens on hover)
+          Rectangle {
+            id: scrollBar
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.right: parent.right
+            width: 8
+            radius: 4
+            visible: listView.contentHeight > listView.height + 1
+            opacity: scrollBarArea.containsMouse || scrollBarArea.pressed ? 1.0 : 0.35
+            color: "transparent"
+
+            Behavior on opacity { NumberAnimation { duration: 120 } }
+
+            Rectangle {
+              id: thumb
+              x: 0
+              width: parent.width
+              radius: parent.radius
+              color: Util.alpha(Color.muted, scrollBarArea.pressed ? 1.0 : 0.7)
+              height: Math.max(40, listView.visibleArea.heightRatio * listView.height)
+              y: {
+                var maxScroll = Math.max(0, listView.contentHeight - listView.height)
+                var denom = scrollBar.height - height
+                return denom > 0 ? (listView.contentY / maxScroll) * denom : 0
+              }
+            }
+
+            MouseArea {
+              id: scrollBarArea
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onPressed: function(mouse) { scrollToMouse(mouse) }
+              onPositionChanged: function(mouse) { if (pressed) scrollToMouse(mouse) }
+
+              // Map the pointer position on the track to list content position.
+              function scrollToMouse(mouse) {
+                var track = scrollBar.height - thumb.height
+                if (track <= 0) return
+                var frac = Math.max(0, Math.min(1, (mouse.y - thumb.height / 2) / track))
+                var maxScroll = Math.max(0, listView.contentHeight - listView.height)
+                listView.contentY = maxScroll * frac
+              }
+            }
+          }
+
+          // Empty state
+          Text {
+            visible: root.plugins.length === 0
+            anchors.centerIn: parent
+            text: "No plugins found"
+            textFormat: Text.PlainText
+            font.pixelSize: Style.font.body
+            color: Color.muted
           }
         }
       }
