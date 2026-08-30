@@ -300,7 +300,7 @@ Item {
               acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
               onWheel: function(ev) {
                 if (ev.pixelDelta.y !== 0)
-                  listView.scrollBy(-ev.pixelDelta.y * 2)
+                  listView.scrollBy(-ev.pixelDelta.y * 3)
                 else
                   listView.scrollBy(-(ev.angleDelta.y / 120) * Math.max(180, listView.height * 0.85))
                 ev.accepted = true
