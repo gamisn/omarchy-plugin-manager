@@ -288,35 +288,21 @@ Item {
             keyNavigationWraps: false
             focus: true
 
-            // Wheel scrolling: accumulates high-resolution deltas so slow
-            // spins are never swallowed, then animates a short glide.
-            property real wheelTarget: 0
-
+            // Wheel scrolling: deltas apply INSTANTLY (no serialized glide
+            // animation — that was making scrolling feel glacial). One notch
+            // steps ~85% of the viewport; touchpad pixel deltas apply 1:2.
             function scrollBy(delta) {
-              if (!wheelAnim.running) wheelTarget = contentY
               var maxScroll = Math.max(0, contentHeight - height)
-              wheelTarget = Math.max(0, Math.min(wheelTarget + delta, maxScroll))
-              wheelAnim.to = wheelTarget
-              wheelAnim.restart()
+              contentY = Math.max(0, Math.min(contentY + delta, maxScroll))
             }
 
-            NumberAnimation {
-              id: wheelAnim
-              target: listView
-              property: "contentY"
-              duration: 160
-              easing.type: Easing.OutQuad
-            }
-
-            // One notch = ~70% of the visible height; pixelDelta (touchpads)
-            // moves proportionally. Always clamped — the list never overshoots.
             WheelHandler {
               acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
               onWheel: function(ev) {
                 if (ev.pixelDelta.y !== 0)
                   listView.scrollBy(-ev.pixelDelta.y * 2)
                 else
-                  listView.scrollBy(-(ev.angleDelta.y / 120) * Math.max(120, listView.height * 0.7))
+                  listView.scrollBy(-(ev.angleDelta.y / 120) * Math.max(180, listView.height * 0.85))
                 ev.accepted = true
               }
             }
