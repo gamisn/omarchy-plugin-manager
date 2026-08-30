@@ -289,8 +289,9 @@ Item {
             focus: true
 
             // Wheel scrolling: deltas apply INSTANTLY (no serialized glide
-            // animation — that was making scrolling feel glacial). One notch
-            // steps ~85% of the viewport; touchpad pixel deltas apply 1:2.
+            // animation — that was the original "slow" feel). One notch
+            // steps a fixed 250px (~2.5 rows) — browser-like; touchpad
+            // pixel deltas apply 1:1.
             function scrollBy(delta) {
               var maxScroll = Math.max(0, contentHeight - height)
               contentY = Math.max(0, Math.min(contentY + delta, maxScroll))
@@ -300,9 +301,9 @@ Item {
               acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
               onWheel: function(ev) {
                 if (ev.pixelDelta.y !== 0)
-                  listView.scrollBy(-ev.pixelDelta.y * 3)
+                  listView.scrollBy(-ev.pixelDelta.y)
                 else
-                  listView.scrollBy(-(ev.angleDelta.y / 120) * Math.max(180, listView.height * 0.85))
+                  listView.scrollBy(-(ev.angleDelta.y / 120) * 250)
                 ev.accepted = true
               }
             }
