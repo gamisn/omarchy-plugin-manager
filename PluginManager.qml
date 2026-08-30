@@ -5,6 +5,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Ui
 import qs.Commons
+import "security.mjs" as Sec
 
 // Plugin Manager — a panel that lists installed Omarchy plugins with their
 // description, author, version, and source link, and lets you remove them.
@@ -83,68 +84,6 @@ Item {
     }
     listProcess.running = true
     listWatchdog.restart()
-  }
-
-  // A plugin's git remote URL is attacker-controllable (git places no
-  // restrictions on remote URLs), so accept only bounded plain https URLs
-  // with no whitespace, control, or shell/URI mischief characters.
-  function isSafeSourceUrl(url) {
-    var s = String(url === null || url === undefined ? "" : url)
-    if (!s || s.length > 200) return false
-    if (s.indexOf("https://") !== 0) return false
-    for (var i = 0; i < s.length; i++) {
-      var c = s.charCodeAt(i)
-      if (c <= 0x20 || c === 0x7f) return false
-    }
-    if (/["'`\\<>{}|$;&*!^]/.test(s)) return false
-    return true
-  }
-
-  function boundString(v, cap) {
-    var s = (v === null || v === undefined) ? "" : String(v)
-    if (s.length > cap) s = s.substring(0, cap) + "…"
-    return s
-  }
-
-  // Consumer caps: bound item count and every field before it reaches a model.
-  function sanitizePlugins(parsed) {
-    if (typeof parsed === "string" || !parsed || parsed.length === undefined)
-      return []
-    var arr = parsed
-    var n = Math.min(arr.length, maxPlugins)
-    var out = []
-    for (var i = 0; i < n; i++) {
-      var p = arr[i]
-      if (!p || typeof p !== "object") continue
-      var kinds = []
-      if (p.kinds && typeof p.kinds !== "string" && p.kinds.length !== undefined) {
-        var m = Math.min(p.kinds.length, 8)
-        for (var k = 0; k < m; k++) kinds.push(boundString(p.kinds[k], 32))
-      }
-      out.push({
-        id: boundString(p.id, maxFieldLen),
-        name: boundString(p.name, maxFieldLen),
-        kinds: kinds,
-        enabled: p.enabled === true,
-        active: p.active === true,
-        canDisable: p.canDisable !== false,
-        firstParty: p.firstParty === true,
-        clonedFrom: boundString(p.clonedFrom, maxFieldLen),
-        description: boundString(p.description, 300),
-        author: boundString(p.author, maxFieldLen),
-        version: boundString(p.version, 64),
-        sourceUrl: boundString(p.sourceUrl, 200)
-      })
-    }
-    return out
-  }
-
-  function openSource(url) {
-    // shell.run resolves to `bash -lc <string>` in the installed shell
-    // (Bar.run -> Util.execDetached), so concatenating untrusted data into it
-    // is arbitrary execution. Launch argv-only, unconditionally.
-    if (!isSafeSourceUrl(url)) return
-    Quickshell.execDetached(["xdg-open", String(url)])
   }
 
   function kindLabel(kinds) {
@@ -244,7 +183,7 @@ Item {
       } else {
         var parsed = []
         try { parsed = JSON.parse(root.listBuffer) } catch (e) { parsed = [] }
-        root.plugins = root.sanitizePlugins(parsed)
+        root.plugins = Sec.sanitizePlugins(parsed, root.maxPlugins, root.maxFieldLen)
         root.statusText = root.plugins.length + " plugins installed"
       }
       root.listBuffer = ""
@@ -266,7 +205,7 @@ Item {
       root.removeDone = true
       root.removeSuccess = (exitCode === 0)
       if (exitCode === 0) {
-        root.statusText = "Removed " + root.boundString(root.removeTarget.id, 64)
+        root.statusText = "Removed " + Sec.boundString(root.removeTarget.id, 64)
         root.refresh()
       } else {
         root.statusText = "Remove failed"
@@ -437,7 +376,7 @@ Item {
               Item { width: 1; height: 1 }
               Text {
                 // Only render a clickable link when the URL passes validation.
-                visible: !!modelData.sourceUrl && root.isSafeSourceUrl(modelData.sourceUrl)
+                visible: !!modelData.sourceUrl && Sec.isSafeSourceUrl(modelData.sourceUrl)
                 text: "Open source ↗"
                 font.pixelSize: Style.font.caption
                 color: Color.accent
