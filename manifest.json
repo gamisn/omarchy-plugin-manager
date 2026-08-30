@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "gamisn.plugin-manager",
   "name": "Plugin Manager",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "author": "gamisn",
   "description": "List installed Omarchy plugins and remove them from a simple panel",
   "license": "MIT",

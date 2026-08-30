@@ -10,6 +10,11 @@ import qs.Commons
 // description, author, version, and source link, and lets you remove them.
 // Summon with:
 //   omarchy-shell shell toggle gamisn.plugin-manager
+//
+// Untrusted-input rule: for this manager, an installed plugin's manifest and
+// git config are untrusted input, not configuration. Anything read out of
+// ~/.config/omarchy/plugins reaches a Process only as an argv element and a
+// Text only with textFormat: Text.PlainText, and is length-capped.
 Item {
   id: root
 
@@ -28,6 +33,17 @@ Item {
   property bool removeRunning: false
   property bool removeDone: false
   property bool removeSuccess: false
+
+  // List-pipeline state
+  property string listBuffer: ""
+  property bool listTimedOut: false
+  property bool listTooBig: false
+
+  // Caps (producer/consumer)
+  readonly property int maxPlugins: 512
+  readonly property int maxFieldLen: 256
+  readonly property int maxListBytes: 2 * 1024 * 1024
+  readonly property int maxRemoveOutputChars: 64 * 1024
 
   readonly property string sourceDir: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir) : ""
@@ -57,20 +73,78 @@ Item {
   function refresh() {
     if (listProcess.running) return
     statusText = "Loading…"
+    listBuffer = ""
+    listTimedOut = false
+    listTooBig = false
     if (helperPath) {
       listProcess.command = [helperPath]
     } else {
       listProcess.command = ["omarchy", "plugin", "list", "--json"]
     }
     listProcess.running = true
+    listWatchdog.restart()
+  }
+
+  // A plugin's git remote URL is attacker-controllable (git places no
+  // restrictions on remote URLs), so accept only bounded plain https URLs
+  // with no whitespace, control, or shell/URI mischief characters.
+  function isSafeSourceUrl(url) {
+    var s = String(url === null || url === undefined ? "" : url)
+    if (!s || s.length > 200) return false
+    if (s.indexOf("https://") !== 0) return false
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charCodeAt(i)
+      if (c <= 0x20 || c === 0x7f) return false
+    }
+    if (/["'`\\<>{}|$;&*!^]/.test(s)) return false
+    return true
+  }
+
+  function boundString(v, cap) {
+    var s = (v === null || v === undefined) ? "" : String(v)
+    if (s.length > cap) s = s.substring(0, cap) + "…"
+    return s
+  }
+
+  // Consumer caps: bound item count and every field before it reaches a model.
+  function sanitizePlugins(parsed) {
+    if (typeof parsed === "string" || !parsed || parsed.length === undefined)
+      return []
+    var arr = parsed
+    var n = Math.min(arr.length, maxPlugins)
+    var out = []
+    for (var i = 0; i < n; i++) {
+      var p = arr[i]
+      if (!p || typeof p !== "object") continue
+      var kinds = []
+      if (p.kinds && typeof p.kinds !== "string" && p.kinds.length !== undefined) {
+        var m = Math.min(p.kinds.length, 8)
+        for (var k = 0; k < m; k++) kinds.push(boundString(p.kinds[k], 32))
+      }
+      out.push({
+        id: boundString(p.id, maxFieldLen),
+        name: boundString(p.name, maxFieldLen),
+        kinds: kinds,
+        enabled: p.enabled === true,
+        active: p.active === true,
+        canDisable: p.canDisable !== false,
+        firstParty: p.firstParty === true,
+        clonedFrom: boundString(p.clonedFrom, maxFieldLen),
+        description: boundString(p.description, 300),
+        author: boundString(p.author, maxFieldLen),
+        version: boundString(p.version, 64),
+        sourceUrl: boundString(p.sourceUrl, 200)
+      })
+    }
+    return out
   }
 
   function openSource(url) {
-    if (!url) return
-    if (root.shell && typeof root.shell.run === "function")
-      root.shell.run("xdg-open " + url)
-    else
-      Quickshell.execDetached(["xdg-open", url])
+    // shell.run resolves to `bash -lc <string>` in the installed shell
+    // (Bar.run -> Util.execDetached), so concatenating untrusted data into it
+    // is arbitrary execution. Launch argv-only, unconditionally.
+    if (!isSafeSourceUrl(url)) return
+    Quickshell.execDetached(["xdg-open", String(url)])
   }
 
   function kindLabel(kinds) {
@@ -105,23 +179,75 @@ Item {
     removeDone = false
     removeSuccess = false
     removeOutput = ""
+    // argv-only: the id stays a single argument, never shell syntax.
     removeProcess.command = ["omarchy", "plugin", "remove", removeTarget.id, "--yes"]
     removeProcess.running = true
+    removeWatchdog.restart()
+  }
+
+  function appendRemoveOutput(data) {
+    var next = root.removeOutput ? root.removeOutput + "\n" + data : data
+    if (next.length > root.maxRemoveOutputChars) {
+      // Keep the tail; drop the oldest characters when the cap is exceeded.
+      next = "…\n" + next.substring(next.length - root.maxRemoveOutputChars)
+    }
+    root.removeOutput = next
+  }
+
+  // Watchdog: the list collector must not run without a deadline (first
+  // review, item 3). Kill the producer and report if it exceeds 10s.
+  Timer {
+    id: listWatchdog
+    interval: 10000
+    onTriggered: {
+      if (listProcess.running) {
+        root.listTimedOut = true
+        listProcess.running = false
+      }
+    }
+  }
+
+  // Watchdog for the remove process; onExited normally stops it.
+  Timer {
+    id: removeWatchdog
+    interval: 120000
+    onTriggered: {
+      if (removeProcess.running) {
+        removeProcess.running = false
+        root.appendRemoveOutput("(timed out after 120s)")
+      }
+    }
   }
 
   Process {
     id: listProcess
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var parsed = []
-        try { parsed = JSON.parse(text) } catch (e) { /* ignore */ }
-        root.plugins = parsed
-        root.statusText = parsed.length + " plugins installed"
+    // Reassemble stdout line-by-line with a hard byte cap, instead of an
+    // unbounded StdioCollector.
+    stdout: SplitParser {
+      onRead: function(data) {
+        root.listBuffer = root.listBuffer ? root.listBuffer + "\n" + data : data
+        if (root.listBuffer.length > root.maxListBytes) {
+          root.listTooBig = true
+          root.listBuffer = ""
+          listProcess.running = false
+        }
       }
     }
     onExited: function(exitCode) {
-      if (exitCode !== 0) root.statusText = "Failed to list plugins"
+      listWatchdog.stop()
+      if (root.listTimedOut) {
+        root.statusText = "Listing timed out"
+      } else if (root.listTooBig) {
+        root.statusText = "Plugin list too large"
+      } else if (exitCode !== 0) {
+        root.statusText = "Failed to list plugins"
+      } else {
+        var parsed = []
+        try { parsed = JSON.parse(root.listBuffer) } catch (e) { parsed = [] }
+        root.plugins = root.sanitizePlugins(parsed)
+        root.statusText = root.plugins.length + " plugins installed"
+      }
+      root.listBuffer = ""
     }
   }
 
@@ -129,21 +255,18 @@ Item {
   Process {
     id: removeProcess
     stdout: SplitParser {
-      onRead: function(data) {
-        root.removeOutput = (root.removeOutput ? root.removeOutput + "\n" : "") + data
-      }
+      onRead: function(data) { root.appendRemoveOutput(data) }
     }
     stderr: SplitParser {
-      onRead: function(data) {
-        root.removeOutput = (root.removeOutput ? root.removeOutput + "\n" : "") + data
-      }
+      onRead: function(data) { root.appendRemoveOutput(data) }
     }
     onExited: function(exitCode) {
+      removeWatchdog.stop()
       root.removeRunning = false
       root.removeDone = true
       root.removeSuccess = (exitCode === 0)
       if (exitCode === 0) {
-        root.statusText = "Removed " + root.removeTarget.id
+        root.statusText = "Removed " + root.boundString(root.removeTarget.id, 64)
         root.refresh()
       } else {
         root.statusText = "Remove failed"
@@ -195,6 +318,7 @@ Item {
           Item { Layout.fillWidth: true }
           Text {
             text: root.statusText
+            textFormat: Text.PlainText
             font.pixelSize: Style.font.caption
             color: Color.muted
           }
@@ -231,6 +355,7 @@ Item {
               Text {
                 width: parent.width
                 text: modelData.name
+                textFormat: Text.PlainText
                 font.pixelSize: Style.font.body
                 font.bold: true
                 color: Color.foreground
@@ -239,6 +364,7 @@ Item {
               Text {
                 width: parent.width
                 text: modelData.id + "  ·  " + root.kindLabel(modelData.kinds)
+                textFormat: Text.PlainText
                 font.pixelSize: Style.font.caption
                 color: Color.muted
                 elide: Text.ElideRight
@@ -278,6 +404,7 @@ Item {
               anchors.rightMargin: 12
               anchors.topMargin: 44
               text: modelData.description || "No description."
+              textFormat: Text.PlainText
               font.pixelSize: Style.font.bodySmall
               color: Color.foreground
               wrapMode: Text.WordWrap
@@ -297,17 +424,20 @@ Item {
 
               Text {
                 text: modelData.author ? "by " + modelData.author : ""
+                textFormat: Text.PlainText
                 font.pixelSize: Style.font.caption
                 color: Color.muted
               }
               Text {
                 text: modelData.version ? "v" + modelData.version : ""
+                textFormat: Text.PlainText
                 font.pixelSize: Style.font.caption
                 color: Color.muted
               }
               Item { width: 1; height: 1 }
               Text {
-                visible: !!modelData.sourceUrl
+                // Only render a clickable link when the URL passes validation.
+                visible: !!modelData.sourceUrl && root.isSafeSourceUrl(modelData.sourceUrl)
                 text: "Open source ↗"
                 font.pixelSize: Style.font.caption
                 color: Color.accent
@@ -373,6 +503,7 @@ Item {
             Text {
               Layout.fillWidth: true
               text: root.removeTarget ? root.removeTarget.name + " (" + root.removeTarget.id + ")" : ""
+              textFormat: Text.PlainText
               font.pixelSize: Style.font.body
               color: Color.foreground
               elide: Text.ElideRight
@@ -397,6 +528,7 @@ Item {
                 anchors.fill: parent
                 anchors.margins: 6
                 text: root.removeCommand
+                textFormat: Text.PlainText
                 font.family: "monospace"
                 font.pixelSize: Style.font.bodySmall
                 color: Color.foreground
@@ -426,6 +558,7 @@ Item {
                   id: outputText
                   width: parent.width
                   text: root.removeOutput || (root.removeRunning ? "Running…" : "(no output)")
+                  textFormat: Text.PlainText
                   font.family: "monospace"
                   font.pixelSize: Style.font.bodySmall
                   color: root.removeDone && !root.removeSuccess ? Color.urgent : Color.foreground
