@@ -38,6 +38,7 @@ In the panel: `↑`/`↓` move row by row, `Page Up`/`Page Down` and `Home`/`End
 
 * Removing a plugin is permanent — it deletes the plugin's folder under `~/.config/omarchy/plugins/<id>/`.
 * First-party plugins (shipped with Omarchy) can also be removed; they are restored on the next Omarchy update.
+* Want a safe target for trying this out? Install the companion [Test Plugin](https://github.com/gamisn/omarchy-test-plugin) — it is deliberately harmless, so you can remove and reinstall it as often as you like.
 
 ## Security model
 
