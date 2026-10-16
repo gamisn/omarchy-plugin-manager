@@ -46,9 +46,11 @@ Item {
   readonly property int maxListBytes: 2 * 1024 * 1024
   readonly property int maxRemoveOutputChars: 64 * 1024
 
-  readonly property string sourceDir: manifest && manifest.__sourceDir
-    ? String(manifest.__sourceDir) : ""
-  readonly property string helperPath: sourceDir ? sourceDir + "/bin/plugin-manager" : ""
+  // Resolve the bundled helper relative to this file. A third-party panel is
+  // handed shell.publicPluginManifest(), which strips __sourceDir, so the
+  // manifest cannot be used to locate the plugin's own script.
+  readonly property string helperPath: decodeURIComponent(
+    String(Qt.resolvedUrl("bin/plugin-manager")).replace(/^file:\/\//, ""))
 
   // ---- lifecycle (panel contract) ----------------------------------------
   function open(payloadJson) {
@@ -89,6 +91,14 @@ Item {
   function kindLabel(kinds) {
     if (!kinds || !kinds.length) return ""
     return kinds.join(", ")
+  }
+
+  // Open a plugin's repository. The URL comes from an installed plugin's git
+  // config, so it is gated on the same https-only validation the link's own
+  // visibility uses, and reaches xdg-open as a single argv element.
+  function openSource(url) {
+    if (!Sec.isSafeSourceUrl(url)) return
+    Quickshell.execDetached(["xdg-open", url])
   }
 
   // ---- remove dialog -----------------------------------------------------
