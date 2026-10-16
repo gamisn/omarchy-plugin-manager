@@ -46,9 +46,11 @@ Item {
   readonly property int maxListBytes: 2 * 1024 * 1024
   readonly property int maxRemoveOutputChars: 64 * 1024
 
-  readonly property string sourceDir: manifest && manifest.__sourceDir
-    ? String(manifest.__sourceDir) : ""
-  readonly property string helperPath: sourceDir ? sourceDir + "/bin/plugin-manager" : ""
+  // Resolve the bundled helper relative to this file. A third-party panel is
+  // handed shell.publicPluginManifest(), which strips __sourceDir, so the
+  // manifest cannot be used to locate the plugin's own script.
+  readonly property string helperPath: decodeURIComponent(
+    String(Qt.resolvedUrl("bin/plugin-manager")).replace(/^file:\/\//, ""))
 
   // ---- lifecycle (panel contract) ----------------------------------------
   function open(payloadJson) {
