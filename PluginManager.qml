@@ -93,6 +93,14 @@ Item {
     return kinds.join(", ")
   }
 
+  // Open a plugin's repository. The URL comes from an installed plugin's git
+  // config, so it is gated on the same https-only validation the link's own
+  // visibility uses, and reaches xdg-open as a single argv element.
+  function openSource(url) {
+    if (!Sec.isSafeSourceUrl(url)) return
+    Quickshell.execDetached(["xdg-open", url])
+  }
+
   // ---- remove dialog -----------------------------------------------------
   function confirmRemove(plugin) {
     if (busy || !plugin) return
